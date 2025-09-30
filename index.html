@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>📈 School Stock Market</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Tailwind CSS for modern UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #f8fafc; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body class="p-4">
+
+  <!-- Login Page -->
+  <div id="loginPage" class="flex flex-col items-center justify-center h-screen">
+    <h1 class="text-3xl font-bold mb-6">🔐 School Stock Market</h1>
+    <input id="loginEmail" type="text" placeholder="Email (for admin)" class="border p-2 mb-3 w-64">
+    <input id="loginPassword" type="password" placeholder="Password" class="border p-2 mb-3 w-64">
+    <button onclick="login()" class="bg-blue-600 text-white px-4 py-2 rounded">Login</button>
+    <p class="text-sm mt-3 text-gray-500">Students: use password <b>vse2k25</b><br>Admin: <b>admin62vse.com / adminvse2k25</b></p>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboardPage" class="hidden">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-2xl font-bold">📊 Dashboard</h2>
+      <button onclick="logout()" class="bg-red-500 text-white px-3 py-1 rounded">Logout</button>
+    </div>
+
+    <div class="mb-4">
+      <input id="searchStock" type="text" placeholder="Search Indian stock (e.g. RELIANCE)" class="border p-2 w-64">
+      <button onclick="searchStockFn()" class="bg-green-600 text-white px-3 py-1 rounded">Search</button>
+      <button onclick="openPortfolio()" class="bg-blue-500 text-white px-3 py-1 rounded">My Portfolio</button>
+      <button onclick="openAdminPanel()" class="bg-purple-500 text-white px-3 py-1 rounded">Admin Panel</button>
+      <input type="color" id="bgColor" onchange="document.body.style.backgroundColor=this.value" class="ml-3">
+    </div>
+
+    <h3 class="text-xl font-semibold mb-2">Top 10 Indian Stocks</h3>
+    <div id="stockList" class="grid grid-cols-2 md:grid-cols-3 gap-4"></div>
+
+    <div id="stockDetails" class="mt-6 hidden">
+      <h3 class="text-xl font-bold mb-2" id="stockTitle"></h3>
+      <div id="tradingviewWidget" class="mb-4"></div>
+      <p id="financialInfo" class="mb-4"></p>
+      <div>
+        <input id="tradeQty" type="number" placeholder="Quantity" class="border p-2 w-32">
+        <button onclick="buyStock()" class="bg-green-600 text-white px-3 py-1 rounded">Buy</button>
+        <button onclick="sellStock()" class="bg-red-600 text-white px-3 py-1 rounded">Sell</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Portfolio -->
+  <div id="portfolioPage" class="hidden">
+    <h2 class="text-2xl font-bold mb-4">💼 My Portfolio</h2>
+    <p id="balanceText" class="mb-2"></p>
+    <div id="portfolioList" class="mb-4"></div>
+    <h3 class="text-xl font-semibold mb-2">Trade History</h3>
+    <div id="tradeHistory"></div>
+    <button onclick="closePortfolio()" class="bg-gray-500 text-white px-3 py-1 mt-4 rounded">Back</button>
+  </div>
+
+  <!-- Admin Panel -->
+  <div id="adminPage" class="hidden">
+    <h2 class="text-2xl font-bold mb-4">🧑‍💼 Admin Panel</h2>
+    <div id="adminData"></div>
+    <button onclick="closeAdmin()" class="bg-gray-500 text-white px-3 py-1 mt-4 rounded">Back</button>
+  </div>
+
+  <script>
+    // ----------------- Config -----------------
+    const FINNHUB_KEY = "d3bm7n1r01qqg7bv706gd3bm7n1r01qqg7bv7070";
+    const START_BALANCE = 50000;
+    const ADMIN_EMAIL = "admin62vse.com";
+    const ADMIN_PASS = "adminvse2k25";
+    const USER_PASS = "vse2k25";
+
+    let currentUser = null;
+    let currentStock = null;
+    const defaultStocks = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN", "ICICIBANK", "AXISBANK", "HINDUNILVR", "BHARTIARTL", "WIPRO"];
+
+    // ----------------- Auth -----------------
+    function login() {
+      const email = document.getElementById("loginEmail").value.trim();
+      const pass = document.getElementById("loginPassword").value.trim();
+
+      if (email === ADMIN_EMAIL && pass === ADMIN_PASS) {
+        currentUser = "admin";
+        showPage("dashboardPage");
+      } else if (pass === USER_PASS) {
+        currentUser = email || "student" + Date.now();
+        if (!localStorage.getItem(currentUser)) {
+          localStorage.setItem(currentUser, JSON.stringify({ balance: START_BALANCE, portfolio: {}, trades: [] }));
+        }
+        showPage("dashboardPage");
+        loadStocks();
+      } else {
+        alert("Invalid login!");
+      }
+    }
+
+    function logout() {
+      currentUser = null;
+      showPage("loginPage");
+    }
+
+    function showPage(id) {
+      document.querySelectorAll("body > div").forEach(div => div.classList.add("hidden"));
+      document.getElementById(id).classList.remove("hidden");
+    }
+
+    // ----------------- Stocks -----------------
+    async function loadStocks() {
+      const stockListDiv = document.getElementById("stockList");
+      stockListDiv.innerHTML = "";
+      for (let sym of defaultStocks) {
+        const price = await getPrice(sym + ".NS");
+        const card = document.createElement("div");
+        card.className = "p-4 border rounded shadow cursor-pointer bg-white";
+        card.innerHTML = `<h4 class="font-bold">${sym}</h4><p>₹${price}</p>`;
+        card.onclick = () => showStock(sym);
+        stockListDiv.appendChild(card);
+      }
+    }
+
+    async function getPrice(symbol) {
+      try {
+        const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`);
+        const data = await res.json();
+        return data.c || 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    async function showStock(sym) {
+      currentStock = sym + ".NS";
+      document.getElementById("stockTitle").innerText = sym;
+      document.getElementById("stockDetails").classList.remove("hidden");
+
+      // TradingView widget
+      document.getElementById("tradingviewWidget").innerHTML = `
+        <div class="tradingview-widget-container">
+          <div id="tradingview_${sym}" style="height:400px"></div>
+        </div>`;
+      new TradingView.widget({
+        "width": "100%",
+        "height": 400,
+        "symbol": "NSE:${sym}",
+        "interval": "D",
+        "timezone": "Asia/Kolkata",
+        "theme": "light",
+        "style": "1",
+        "locale": "en",
+        "container_id": `tradingview_${sym}`
+      });
+
+      // Financial info
+      const res = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${currentStock}&metric=all&token=${FINNHUB_KEY}`);
+      const data = await res.json();
+      if (data.metric) {
+        document.getElementById("financialInfo").innerHTML =
+          `Market Cap: ₹${(data.metric.marketCapitalization || 0).toFixed(2)} Cr<br>
+           P/E: ${(data.metric.peBasicExclExtraTTM || 0).toFixed(2)}<br>
+           EPS: ${(data.metric.epsBasicExclExtraItemsTTM || 0).toFixed(2)}`;
+      }
+    }
+
+    function searchStockFn() {
+      const s = document.getElementById("searchStock").value.trim().toUpperCase();
+      if (s) showStock(s);
+    }
+
+    // ----------------- Trading -----------------
+    async function buyStock() {
+      const qty = parseInt(document.getElementById("tradeQty").value);
+      if (!qty || qty <= 0) return alert("Enter valid quantity");
+      const user = JSON.parse(localStorage.getItem(currentUser));
+      const price = await getPrice(currentStock);
+      const cost = qty * price;
+      if (user.balance < cost) return alert("Not enough balance!");
+      user.balance -= cost;
+      user.portfolio[currentStock] = (user.portfolio[currentStock] || 0) + qty;
+      user.trades.push({ type: "BUY", stock: currentStock, qty, price, time: new Date().toLocaleString() });
+      localStorage.setItem(currentUser, JSON.stringify(user));
+      alert("Bought!");
+    }
+
+    async function sellStock() {
+      const qty = parseInt(document.getElementById("tradeQty").value);
+      if (!qty || qty <= 0) return alert("Enter valid quantity");
+      const user = JSON.parse(localStorage.getItem(currentUser));
+      if (!user.portfolio[currentStock] || user.portfolio[currentStock] < qty) return alert("Not enough shares!");
+      const price = await getPrice(currentStock);
+      user.balance += qty * price;
+      user.portfolio[currentStock] -= qty;
+      user.trades.push({ type: "SELL", stock: currentStock, qty, price, time: new Date().toLocaleString() });
+      localStorage.setItem(currentUser, JSON.stringify(user));
+      alert("Sold!");
+    }
+
+    // ----------------- Portfolio -----------------
+    function openPortfolio() {
+      const user = JSON.parse(localStorage.getItem(currentUser));
+      document.getElementById("balanceText").innerText = `Balance: ₹${user.balance.toFixed(2)}`;
+      let portHTML = "";
+      for (let s in user.portfolio) {
+        if (user.portfolio[s] > 0) portHTML += `<p>${s}: ${user.portfolio[s]} shares</p>`;
+      }
+      document.getElementById("portfolioList").innerHTML = portHTML || "No holdings";
+      document.getElementById("tradeHistory").innerHTML = user.trades.map(t => `<p>${t.time} - ${t.type} ${t.qty} @ ₹${t.price} (${t.stock})</p>`).join("");
+      showPage("portfolioPage");
+    }
+    function closePortfolio() { showPage("dashboardPage"); }
+
+    // ----------------- Admin -----------------
+    function openAdminPanel() {
+      if (currentUser !== "admin") return alert("Admins only!");
+      let html = "";
+      for (let key in localStorage) {
+        if (localStorage.getItem(key) && key !== "admin") {
+          try {
+            const u = JSON.parse(localStorage.getItem(key));
+            html += `<div class="border p-2 mb-2"><h4 class="font-bold">${key}</h4>
+              Balance: ₹${u.balance}<br>
+              Portfolio: ${JSON.stringify(u.portfolio)}<br>
+              Trades: ${u.trades.length}</div>`;
+          } catch {}
+        }
+      }
+      document.getElementById("adminData").innerHTML = html || "No users yet.";
+      showPage("adminPage");
+    }
+    function closeAdmin() { showPage("dashboardPage"); }
+  </script>
+
+  <!-- TradingView script -->
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+</body>
+</html>
